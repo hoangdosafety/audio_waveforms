@@ -24,11 +24,7 @@ class PlayerController extends ChangeNotifier {
 
   bool get shouldRefresh => _shouldRefresh;
 
-  void _setPlayerState(PlayerState state) {
-    _playerState = state;
-    PlatformStreams.instance
-        .addPlayerStateEvent(PlayerIdentifier(playerKey, state));
-  }
+  bool _isDisposed = false;
 
   int _maxDuration = -1;
 
@@ -43,6 +39,19 @@ class PlayerController extends ChangeNotifier {
   final bool _shouldClearLabels = false;
 
   bool get shouldClearLabels => _shouldClearLabels;
+
+  /// Rate of updating the reported current duration. Making it high will
+  /// cause reporting duration at faster rate which also causes UI to look
+  /// smoother.
+  ///
+  /// **Important** -: As duration is reported from platform, low-end devices
+  /// may have higher impact if UpdateFrequency is set to high.
+  ///
+  /// Defaults to low (updates every 200 milliseconds).
+  ///
+  /// See also:
+  /// * [UpdateFrequency]
+  UpdateFrequency updateFrequency = UpdateFrequency.low;
 
   /// A stream to get current state of the player. This stream
   /// will emit event whenever there is change in the playerState.
@@ -72,6 +81,12 @@ class PlayerController extends ChangeNotifier {
       PlatformStreams.instance.init();
     }
     PlatformStreams.instance.playerControllerFactory.addAll({playerKey: this});
+  }
+
+  void _setPlayerState(PlayerState state) {
+    _playerState = state;
+    PlatformStreams.instance
+        .addPlayerStateEvent(PlayerIdentifier(playerKey, state));
   }
 
   /// Calls platform to prepare player.
@@ -104,8 +119,12 @@ class PlayerController extends ChangeNotifier {
     int noOfSamples = 100,
   }) async {
     path = Uri.parse(path).path;
-    final isPrepared = await AudioWaveformsInterface.instance
-        .preparePlayer(path, playerKey, volume);
+    final isPrepared = await AudioWaveformsInterface.instance.preparePlayer(
+      path: path,
+      key: playerKey,
+      frequency: _getFrequency(),
+      volume: volume,
+    );
     if (isPrepared) {
       _maxDuration = await getDuration();
       _setPlayerState(PlayerState.initialized);
@@ -116,7 +135,7 @@ class PlayerController extends ChangeNotifier {
         path: path,
         noOfSamples: noOfSamples,
       ).then(
-        (value) {
+            (value) {
           waveformData
             ..clear()
             ..addAll(value);
@@ -183,7 +202,7 @@ class PlayerController extends ChangeNotifier {
   /// Pauses currently playing audio.
   Future<void> pausePlayer() async {
     final isPaused =
-        await AudioWaveformsInterface.instance.pausePlayer(playerKey);
+    await AudioWaveformsInterface.instance.pausePlayer(playerKey);
     if (isPaused) {
       _setPlayerState(PlayerState.paused);
     }
@@ -193,7 +212,7 @@ class PlayerController extends ChangeNotifier {
   /// A function to stop player. After calling this, resources are freed.
   Future<void> stopPlayer() async {
     final isStopped =
-        await AudioWaveformsInterface.instance.stopPlayer(playerKey);
+    await AudioWaveformsInterface.instance.stopPlayer(playerKey);
     if (isStopped) {
       _setPlayerState(PlayerState.stopped);
     }
@@ -209,7 +228,7 @@ class PlayerController extends ChangeNotifier {
   /// Default to 1.0
   Future<bool> setVolume(double volume) async {
     final result =
-        await AudioWaveformsInterface.instance.setVolume(volume, playerKey);
+    await AudioWaveformsInterface.instance.setVolume(volume, playerKey);
     return result;
   }
 
@@ -231,8 +250,7 @@ class PlayerController extends ChangeNotifier {
   /// otherwise nothing happens.
   Future<void> seekTo(int progress) async {
     if (progress < 0) return;
-    if (_playerState == PlayerState.playing ||
-        _playerState == PlayerState.paused) {
+    if (_playerState == PlayerState.playing || _playerState == PlayerState.paused) {
       await AudioWaveformsInterface.instance.seekTo(playerKey, progress);
     }
   }
@@ -250,6 +268,7 @@ class PlayerController extends ChangeNotifier {
     if (PlatformStreams.instance.playerControllerFactory.length == 1) {
       PlatformStreams.instance.dispose();
     }
+    _isDisposed = true;
     super.dispose();
   }
 
@@ -272,6 +291,24 @@ class PlayerController extends ChangeNotifier {
   void setRefresh(bool refresh) {
     _shouldRefresh = refresh;
     notifyListeners();
+  }
+
+  // TODO: Replace this with enhanced enum when we drop support for dart 2.17 earlier versions
+  int _getFrequency() {
+    switch (updateFrequency) {
+      case UpdateFrequency.high:
+        return 2;
+      case UpdateFrequency.medium:
+        return 1;
+      case UpdateFrequency.low:
+        return 0;
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    if (_isDisposed) return;
+    super.notifyListeners();
   }
 
   @override
